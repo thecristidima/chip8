@@ -18,3 +18,4 @@ Implementation is based on [Cowgod's documentation](http://devernay.free.fr/hack
 *This section is meant to document issues I ran into while writing the emulator. I doubt anyone else will read this, but I'm sure it'll help me when I make the same mistake later on when working on other projects.*
 
 - Debugging is a mess, need to work out some way of dumping out data in a readable format
+- Could not get screen to render correctly with SDL2 until I checked user input; Didn't bother to read the documentation (of course), but I still think this should've worked.

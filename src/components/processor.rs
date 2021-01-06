@@ -4,7 +4,7 @@ use std::fs;
 
 use rand;
 
-pub struct Chip8 {
+pub struct Processor {
     mem: [u8; 4096],          // 4k memory
     v: [u8; 16],              // 16 8-bit general purpose registers
     i: usize,                 // stores memory address (16-bit)
@@ -20,9 +20,9 @@ pub struct Chip8 {
     enable_logs: bool, // debug purposes
 }
 
-impl Chip8 {
-    pub fn new(enable_logs: bool) -> Chip8 {
-        Chip8 {
+impl Processor {
+    pub fn new(enable_logs: bool) -> Processor {
+        Processor {
             mem: [0; 4096],
             v: [0; 16],
             i: 0,
