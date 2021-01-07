@@ -4,6 +4,14 @@ This is a [CHIP 8](https://en.wikipedia.org/wiki/CHIP-8) emulator written in Rus
 
 Implementation is based on [Cowgod's documentation](http://devernay.free.fr/hacks/chip8/C8TECH10.HTM#2.1) and other CHIP 8 emulators found online.
 
+### **How to run**
+
+You will need to have the Rust toolchain installed. To run the emulator simply run:
+
+```
+cargo run -- $path_to_rom
+```
+
 ### **Implementation goals**
 
 *DISCLAIMER: I will probably not implement all of these, but I can still hope, right?*
