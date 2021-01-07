@@ -303,7 +303,7 @@ impl Processor {
             0
         };
 
-        self.v[x as usize] <<= 2;
+        self.v[x as usize] <<= 1;
 
         ProgramCounterAction::Advance
     }
@@ -439,6 +439,15 @@ impl Processor {
         }
 
         ProgramCounterAction::Advance
+    }
+
+    #[allow(dead_code)]
+    pub fn debug(&self) {
+        let instruction = (self.mem[self.pc] as u16) << 8 | self.mem[self.pc + 1] as u16;
+
+        println!("PC: {}, I: {}, SP: {}", self.pc, self.i, self.sp);
+        println!("Vx: {:?}", self.v);
+        println!("Next instruction: {:#4x}\n", instruction);
     }
 }
 
