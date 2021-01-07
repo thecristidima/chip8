@@ -10,8 +10,10 @@ Implementation is based on [Cowgod's documentation](http://devernay.free.fr/hack
 
 - [x] ~~Unit test operations (shouldn't be too hard, just tedious)~~ Test ROMs + unit tests for PC incrementation
 - [x] Add sound support
-- [ ] Find a way to save state (and resume from it later on)
-- [ ] Customisable user settings (e.g. custom colour schemes)
+- [ ] ~~Find a way to save state (and resume from it later on)~~
+- [ ] ~~Customisable user settings (e.g. custom colour schemes)~~
+
+Last couple of points are pretty easy to implement, but CHIP8 games are too short and I'm too lazy to refactor this. Will try to implement them in a GameBoy emulator (some day).
 
 ### **Issues I encountered during development**
 
