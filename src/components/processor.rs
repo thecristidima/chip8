@@ -173,12 +173,18 @@ impl Processor {
         };
     }
 
+    // 00E0 - CLS
+    // Clear the display.
     fn op_00e0(&mut self) -> ProgramCounterAction {
         self.vram = [[0; 64]; 32];
 
         ProgramCounterAction::Advance
     }
 
+    // 00EE - RET
+    // Return from a subroutine.
+    // The interpreter sets the program counter to the address at the top
+    // of the stack, then subtracts 1 from the stack pointer.
     fn op_00ee(&mut self) -> ProgramCounterAction {
         self.pc = self.stack[self.sp as usize] as usize;
         self.sp -= 1; // Maybe check if this underflows?
@@ -186,10 +192,17 @@ impl Processor {
         ProgramCounterAction::Advance
     }
 
+    // 1nnn - JP addr
+    // Jump to location nnn.
+    // The interpreter sets the program counter to nnn.
     fn op_1nnn(&mut self, nnn: u16) -> ProgramCounterAction {
         ProgramCounterAction::Jump(nnn as usize)
     }
 
+    // 2nnn - CALL addr
+    // Call subroutine at nnn.
+    // The interpreter increments the stack pointer, then puts the current PC
+    // on the top of the stack. The PC is then set to nnn.
     fn op_2nnn(&mut self, nnn: u16) -> ProgramCounterAction {
         self.sp += 1;
         self.stack[self.sp as usize] = self.pc as u16;
@@ -197,18 +210,26 @@ impl Processor {
         ProgramCounterAction::Jump(nnn as usize)
     }
 
+    // 3xkk - SE Vx, byte
+    // Skip next instruction if Vx = kk.
+    // The interpreter compares register Vx to kk, and if they are equal,
+    // increments the program counter by 2.
     fn op_3xkk(&mut self, x: u8, kk: u8) -> ProgramCounterAction {
         let vx = self.v[x as usize];
 
         ProgramCounterAction::skip_if(vx == kk)
     }
 
+    // 4xkk - SNE Vx, byte
+    // Skip next instruction if Vx != kk.
     fn op_4xkk(&mut self, x: u8, kk: u8) -> ProgramCounterAction {
         let vx = self.v[x as usize];
 
         ProgramCounterAction::skip_if(vx != kk)
     }
 
+    // 5xy0 - SE Vx, Vy
+    // Skip next instruction if Vx = Vy.
     fn op_5xy0(&mut self, x: u8, y: u8) -> ProgramCounterAction {
         let vx = self.v[x as usize];
         let vy = self.v[y as usize];
@@ -216,42 +237,61 @@ impl Processor {
         ProgramCounterAction::skip_if(vx == vy)
     }
 
+    // 6xkk - LD Vx, byte
+    // Set Vx = kk.
     fn op_6xkk(&mut self, x: u8, kk: u8) -> ProgramCounterAction {
         self.v[x as usize] = kk;
 
         ProgramCounterAction::Advance
     }
 
+    // 7xkk - ADD Vx, byte
+    // Set Vx = Vx + kk.
+    // Note: I'm doing a wrapping add here because one of the test ROMs
+    // will run this instruction and the result won't fit in a u8.
+    // I personally think this is a flaw in the test ROM, but other
+    // programs aren't affected by this change (probably because they
+    // are designed better).
     fn op_7xkk(&mut self, x: u8, kk: u8) -> ProgramCounterAction {
         self.v[x as usize] = self.v[x as usize].wrapping_add(kk);
 
         ProgramCounterAction::Advance
     }
 
+    // 8xy0 - LD Vx, Vy
+    // Set Vx = Vy.
     fn op_8xy0(&mut self, x: u8, y: u8) -> ProgramCounterAction {
         self.v[x as usize] = self.v[y as usize];
 
         ProgramCounterAction::Advance
     }
 
+    // 8xy1 - OR Vx, Vy
+    // Set Vx = Vx OR Vy.
     fn op_8xy1(&mut self, x: u8, y: u8) -> ProgramCounterAction {
         self.v[x as usize] = self.v[x as usize] | self.v[y as usize];
 
         ProgramCounterAction::Advance
     }
 
+    // 8xy2 - AND Vx, Vy
+    // Set Vx = Vx AND Vy.
     fn op_8xy2(&mut self, x: u8, y: u8) -> ProgramCounterAction {
         self.v[x as usize] = self.v[x as usize] & self.v[y as usize];
 
         ProgramCounterAction::Advance
     }
 
+    // 8xy3 - XOR Vx, Vy
+    // Set Vx = Vx XOR Vy.
     fn op_8xy3(&mut self, x: u8, y: u8) -> ProgramCounterAction {
         self.v[x as usize] = self.v[x as usize] ^ self.v[y as usize];
 
         ProgramCounterAction::Advance
     }
 
+    // 8xy4 - ADD Vx, Vy
+    // Set Vx = Vx + Vy, set VF = carry.
     fn op_8xy4(&mut self, x: u8, y: u8) -> ProgramCounterAction {
         let vx = self.v[x as usize] as u16;
         let vy = self.v[y as usize] as u16;
@@ -266,6 +306,8 @@ impl Processor {
         ProgramCounterAction::Advance
     }
 
+    // 8xy5 - SUB Vx, Vy
+    // Set Vx = Vx - Vy, set VF = NOT borrow.
     fn op_8xy5(&mut self, x: u8, y: u8) -> ProgramCounterAction {
         let vx = self.v[x as usize];
         let vy = self.v[y as usize];
@@ -277,6 +319,8 @@ impl Processor {
         ProgramCounterAction::Advance
     }
 
+    // 8xy6 - SHR Vx {, Vy}
+    // Set Vx = Vx >> 1.
     fn op_8xy6(&mut self, x: u8) -> ProgramCounterAction {
         self.v[0x0F] = self.v[x as usize] % 2;
 
@@ -285,6 +329,8 @@ impl Processor {
         ProgramCounterAction::Advance
     }
 
+    // 8xy7 - SUBN Vx, Vy
+    // Set Vx = Vy - Vx, set VF = NOT borrow.
     fn op_8xy7(&mut self, x: u8, y: u8) -> ProgramCounterAction {
         let vx = self.v[x as usize];
         let vy = self.v[y as usize];
@@ -296,6 +342,8 @@ impl Processor {
         ProgramCounterAction::Advance
     }
 
+    // 8xyE - SHL Vx {, Vy}
+    // Set Vx = Vx << 1.
     fn op_8xyE(&mut self, x: u8) -> ProgramCounterAction {
         self.v[0x0F] = if self.v[x as usize] & 0b1000_0000 != 0 {
             1
@@ -308,20 +356,28 @@ impl Processor {
         ProgramCounterAction::Advance
     }
 
+    // 9xy0 - SNE Vx, Vy
+    // Skip next instruction if Vx != Vy.
     fn op_9xy0(&mut self, x: u8, y: u8) -> ProgramCounterAction {
         ProgramCounterAction::skip_if(self.v[x as usize] != self.v[y as usize])
     }
 
+    // Annn - LD I, addr
+    // Set I = nnn.
     fn op_Annn(&mut self, nnn: u16) -> ProgramCounterAction {
         self.i = nnn as usize;
 
         ProgramCounterAction::Advance
     }
 
+    // Bnnn - JP V0, addr
+    // Jump to location nnn + V0.
     fn op_Bnnn(&mut self, nnn: u16) -> ProgramCounterAction {
         ProgramCounterAction::Jump((self.v[0] as u16 + nnn) as usize)
     }
 
+    // Cxkk - RND Vx, byte
+    // Set Vx = random byte AND kk.
     fn op_Cxkk(&mut self, x: u8, kk: u8) -> ProgramCounterAction {
         let rand_byte = rand::random::<u8>();
 
@@ -330,6 +386,15 @@ impl Processor {
         ProgramCounterAction::Advance
     }
 
+    // Dxyn - DRW Vx, Vy, nibble
+    // Display n-byte sprite starting at memory location I at (Vx, Vy), set VF = collision.
+    //
+    // The interpreter reads n bytes from memory, starting at the address stored in I.
+    // These bytes are then displayed as sprites on screen at coordinates (Vx, Vy).
+    // Sprites are XORed onto the existing screen.
+    // If this causes any pixels to be erased, VF is set to 1, otherwise it is set to 0.
+    // If the sprite is positioned so part of it is outside the coordinates of the display,
+    // it wraps around to the opposite side of the screen.
     fn op_Dxyn(&mut self, x: u8, y: u8, n: u8) -> ProgramCounterAction {
         self.redraw = true;
         self.v[0x0F] = 0; // initially assume we don't flip any display bits
@@ -359,20 +424,28 @@ impl Processor {
         }
     }
 
+    // Ex9E - SKP Vx
+    // Skip next instruction if key with the value of Vx is pressed.
     fn op_Ex9E(&mut self, x: u8) -> ProgramCounterAction {
         ProgramCounterAction::skip_if(self.pressed_keys[self.v[x as usize] as usize])
     }
 
+    // ExA1 - SKNP Vx
+    // Skip next instruction if key with the value of Vx is not pressed.
     fn op_ExA1(&mut self, x: u8) -> ProgramCounterAction {
         ProgramCounterAction::skip_if(!self.pressed_keys[self.v[x as usize] as usize])
     }
 
+    // Fx07 - LD Vx, DT
+    // Set Vx = delay timer value.
     fn op_Fx07(&mut self, x: u8) -> ProgramCounterAction {
         self.v[x as usize] = self.delay_timer;
 
         ProgramCounterAction::Advance
     }
 
+    // Fx0A - LD Vx, K
+    // Wait for a key press, store the value of the key in Vx.
     fn op_Fx0A(&mut self, x: u8) -> ProgramCounterAction {
         let mut user_pressed_key = false;
 
@@ -391,30 +464,41 @@ impl Processor {
         )
     }
 
+    // Fx15 - LD DT, Vx
+    // Set delay timer = Vx.
     fn op_Fx15(&mut self, x: u8) -> ProgramCounterAction {
         self.delay_timer = self.v[x as usize];
 
         ProgramCounterAction::Advance
     }
 
+    // Fx18 - LD ST, Vx
+    // Set sound timer = Vx.
     fn op_Fx18(&mut self, x: u8) -> ProgramCounterAction {
         self.sound_timer = self.v[x as usize];
 
         ProgramCounterAction::Advance
     }
 
+    // Fx1E - ADD I, Vx
+    // Set I = I + Vx.
     fn op_Fx1E(&mut self, x: u8) -> ProgramCounterAction {
         self.i += self.v[x as usize] as usize;
 
         ProgramCounterAction::Advance
     }
 
+    // Fx29 - LD F, Vx
+    // Set I = location of sprite for digit Vx.
     fn op_Fx29(&mut self, x: u8) -> ProgramCounterAction {
         self.i = self.v[x as usize] as usize * 5;
 
         ProgramCounterAction::Advance
     }
 
+    // Fx33 - LD B, Vx
+    // Store BCD representation of Vx in memory locations I, I+1, and I+2.
+    // Note: Hundreds digit at I, tens digit at I+1, last digit at I+2.
     fn op_Fx33(&mut self, x: u8) -> ProgramCounterAction {
         let vx = self.v[x as usize];
 
@@ -425,6 +509,8 @@ impl Processor {
         ProgramCounterAction::Advance
     }
 
+    // Fx55 - LD [I], Vx
+    // Store registers V0 through Vx in memory starting at location I.
     fn op_Fx55(&mut self, x: u8) -> ProgramCounterAction {
         for idx in 0..=x {
             self.mem[self.i + idx as usize] = self.v[idx as usize];
@@ -433,6 +519,8 @@ impl Processor {
         ProgramCounterAction::Advance
     }
 
+    // Fx65 - LD Vx, [I]
+    // Read registers V0 through Vx from memory starting at location I.
     fn op_Fx65(&mut self, x: u8) -> ProgramCounterAction {
         for idx in 0..=x {
             self.v[idx as usize] = self.mem[self.i + idx as usize];
