@@ -4,9 +4,9 @@ use std::{thread, time::Duration};
 
 use std::env;
 
-use components::display::Display;
 use components::input::Input;
 use components::processor::Processor;
+use components::{display::Display, speaker::Speaker};
 
 fn main() {
     let args = env::args().collect::<Vec<_>>();
@@ -22,6 +22,7 @@ fn main() {
 
     let mut display = Display::new(&sdl_context, 10);
     let mut input = Input::new(&sdl_context);
+    let mut speaker = Speaker::new(&sdl_context);
 
     while let Ok(pressed_keys) = input.poll() {
         let (redraw, beep) = cpu.run_cycle(pressed_keys);
@@ -31,9 +32,9 @@ fn main() {
         }
 
         if beep {
-            // TODO Make noise
+            speaker.play();
         } else {
-            // TODO Stop making noise
+            speaker.stop();
         }
 
         thread::sleep(Duration::from_millis(2));

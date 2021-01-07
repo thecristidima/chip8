@@ -8,10 +8,10 @@ Implementation is based on [Cowgod's documentation](http://devernay.free.fr/hack
 
 *DISCLAIMER: I will probably not implement all of these, but I can still hope, right?*
 
-- ~~Unit test operations (shouldn't be too hard, just tedious)~~ Replaced with test ROMs (and a few unit tests to check PC is incremented correctly)
-- Add sound support
-- Find a way to save state (and resume from it later on)
-- Customisable user settings (e.g. custom colour schemes)
+- [x] ~~Unit test operations (shouldn't be too hard, just tedious)~~ Test ROMs + unit tests for PC incrementation
+- [x] Add sound support
+- [ ] Find a way to save state (and resume from it later on)
+- [ ] Customisable user settings (e.g. custom colour schemes)
 
 ### **Issues I encountered during development**
 
