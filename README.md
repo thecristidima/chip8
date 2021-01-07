@@ -8,7 +8,7 @@ Implementation is based on [Cowgod's documentation](http://devernay.free.fr/hack
 
 *DISCLAIMER: I will probably not implement all of these, but I can still hope, right?*
 
-- Unit test operations (shouldn't be too hard, just tedious)
+- ~~Unit test operations (shouldn't be too hard, just tedious)~~ Replaced with test ROMs (and a few unit tests to check PC is incremented correctly)
 - Add sound support
 - Find a way to save state (and resume from it later on)
 - Customisable user settings (e.g. custom colour schemes)
@@ -19,3 +19,4 @@ Implementation is based on [Cowgod's documentation](http://devernay.free.fr/hack
 
 - Debugging is a mess, need to work out some way of dumping out data in a readable format
 - Could not get screen to render correctly with SDL2 until I checked user input; Didn't bother to read the documentation (of course), but I still think this should've worked.
+- I kept incrementing the PC even after a jump; test ROMs didn't help with this, I had to dump registers and compare them with other emulators. Luckily, one of the ROMs had a jump instruction at the beginning.

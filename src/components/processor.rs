@@ -4,8 +4,6 @@ use std::fs;
 
 use rand;
 
-const ENABLE_LOGS: bool = false;
-
 const FONT_SET: [u8; 80] = [
     // 16 sprites, each is 5 bytes long
     0xF0, 0x90, 0x90, 0x90, 0xF0, 0x20, 0x60, 0x20, 0x20, 0x70, 0xF0, 0x10, 0xF0, 0x80, 0xF0, 0xF0,
@@ -14,6 +12,35 @@ const FONT_SET: [u8; 80] = [
     0x10, 0xF0, 0xF0, 0x90, 0xF0, 0x90, 0x90, 0xE0, 0x90, 0xE0, 0x90, 0xE0, 0xF0, 0x80, 0x80, 0x80,
     0xF0, 0xE0, 0x90, 0x90, 0x90, 0xE0, 0xF0, 0x80, 0xF0, 0x80, 0xF0, 0xF0, 0x80, 0xF0, 0x80, 0x80,
 ];
+
+enum ProgramCounterAction {
+    Advance,
+    SkipNext,
+    Jump(usize),
+    WaitForKey,
+}
+
+impl ProgramCounterAction {
+    fn action_if(
+        condition: bool,
+        action_true: ProgramCounterAction,
+        action_false: ProgramCounterAction,
+    ) -> ProgramCounterAction {
+        if condition {
+            action_true
+        } else {
+            action_false
+        }
+    }
+
+    fn skip_if(condition: bool) -> ProgramCounterAction {
+        ProgramCounterAction::action_if(
+            condition,
+            ProgramCounterAction::SkipNext,
+            ProgramCounterAction::Advance,
+        )
+    }
+}
 
 pub struct Processor {
     mem: [u8; 4096],          // 4k memory
@@ -26,7 +53,6 @@ pub struct Processor {
     sp: usize,                // stack pointer (8-bit)
     vram: [[u8; 64]; 32],     // display is 64 wide x 32 tall
     pressed_keys: [bool; 16], // array of pressed keys
-    wait_for_key: bool,       // halt execution until user presses key
     redraw: bool,             // helper flag set whenever DRAW is called
 }
 
@@ -50,8 +76,7 @@ impl Processor {
             vram: [[0; 64]; 32],
 
             pressed_keys: [false; 16],
-            wait_for_key: false,
-            redraw: false
+            redraw: false,
         }
     }
 
@@ -64,9 +89,7 @@ impl Processor {
 
         self.mem[512..512 + rom.len()].copy_from_slice(&rom);
 
-        if ENABLE_LOGS {
-            println!("Loaded ROM, total bytes: {}\n", rom.len());
-        }
+        println!("Loaded ROM, total bytes: {}\n", rom.len());
     }
 
     pub fn run_cycle(&mut self, pressed_keys: [bool; 16]) -> (bool, bool) {
@@ -104,7 +127,7 @@ impl Processor {
         let y = nibbles.2; // _high_ 4 bits of _low_ byte
         let n = nibbles.3; // _low_ 4 bits of _low_ byte
 
-        match nibbles {
+        let pc_action = match nibbles {
             (0x00, 0x00, 0x0E, 0x00) => self.op_00e0(),
             (0x00, 0x00, 0x0E, 0x0E) => self.op_00ee(),
             (0x01, _, _, _) => self.op_1nnn(nnn),
@@ -139,84 +162,97 @@ impl Processor {
             (0x0F, _, 0x03, 0x03) => self.op_Fx33(x),
             (0x0F, _, 0x05, 0x05) => self.op_Fx55(x),
             (0x0F, _, 0x06, 0x05) => self.op_Fx65(x),
-            _ => {},
-        }
+            _ => ProgramCounterAction::Advance,
+        };
 
-        if !self.wait_for_key {
-            self.pc += 2; // advance PC to next instruction
-        }
+        match pc_action {
+            ProgramCounterAction::Advance => self.pc += 2,
+            ProgramCounterAction::SkipNext => self.pc += 4,
+            ProgramCounterAction::Jump(addr) => self.pc = addr,
+            ProgramCounterAction::WaitForKey => {}
+        };
     }
 
-    // TODO Copy-paste documentation to each function
-    fn op_00e0(&mut self) {
+    fn op_00e0(&mut self) -> ProgramCounterAction {
         self.vram = [[0; 64]; 32];
+
+        ProgramCounterAction::Advance
     }
 
-    fn op_00ee(&mut self) {
+    fn op_00ee(&mut self) -> ProgramCounterAction {
         self.pc = self.stack[self.sp as usize] as usize;
         self.sp -= 1; // Maybe check if this underflows?
+
+        ProgramCounterAction::Advance
     }
 
-    fn op_1nnn(&mut self, nnn: u16) {
-        self.pc = nnn as usize;
+    fn op_1nnn(&mut self, nnn: u16) -> ProgramCounterAction {
+        ProgramCounterAction::Jump(nnn as usize)
     }
 
-    fn op_2nnn(&mut self, nnn: u16) {
+    fn op_2nnn(&mut self, nnn: u16) -> ProgramCounterAction {
         self.sp += 1;
         self.stack[self.sp as usize] = self.pc as u16;
-        self.pc = nnn as usize;
+
+        ProgramCounterAction::Jump(nnn as usize)
     }
 
-    fn op_3xkk(&mut self, x: u8, kk: u8) {
+    fn op_3xkk(&mut self, x: u8, kk: u8) -> ProgramCounterAction {
         let vx = self.v[x as usize];
-        if vx == kk {
-            self.pc += 2;
-        }
+
+        ProgramCounterAction::skip_if(vx == kk)
     }
 
-    fn op_4xkk(&mut self, x: u8, kk: u8) {
+    fn op_4xkk(&mut self, x: u8, kk: u8) -> ProgramCounterAction {
         let vx = self.v[x as usize];
-        if vx != kk {
-            self.pc += 2;
-        }
+
+        ProgramCounterAction::skip_if(vx != kk)
     }
 
-    fn op_5xy0(&mut self, x: u8, y: u8) {
+    fn op_5xy0(&mut self, x: u8, y: u8) -> ProgramCounterAction {
         let vx = self.v[x as usize];
         let vy = self.v[y as usize];
-        if vx == vy {
-            self.pc += 2;
-        }
+
+        ProgramCounterAction::skip_if(vx == vy)
     }
 
-    fn op_6xkk(&mut self, x: u8, kk: u8) {
+    fn op_6xkk(&mut self, x: u8, kk: u8) -> ProgramCounterAction {
         self.v[x as usize] = kk;
+
+        ProgramCounterAction::Advance
     }
 
-    // TODO check for overflow?
-    // documentation doesn't mention it, probably not an issue
-    // edit: this fails TEST_2, so leaving the wrapping bit on, but won't set VF
-    fn op_7xkk(&mut self, x: u8, kk: u8) {
+    fn op_7xkk(&mut self, x: u8, kk: u8) -> ProgramCounterAction {
         self.v[x as usize] = self.v[x as usize].wrapping_add(kk);
+
+        ProgramCounterAction::Advance
     }
 
-    fn op_8xy0(&mut self, x: u8, y: u8) {
+    fn op_8xy0(&mut self, x: u8, y: u8) -> ProgramCounterAction {
         self.v[x as usize] = self.v[y as usize];
+
+        ProgramCounterAction::Advance
     }
 
-    fn op_8xy1(&mut self, x: u8, y: u8) {
+    fn op_8xy1(&mut self, x: u8, y: u8) -> ProgramCounterAction {
         self.v[x as usize] = self.v[x as usize] | self.v[y as usize];
+
+        ProgramCounterAction::Advance
     }
 
-    fn op_8xy2(&mut self, x: u8, y: u8) {
+    fn op_8xy2(&mut self, x: u8, y: u8) -> ProgramCounterAction {
         self.v[x as usize] = self.v[x as usize] & self.v[y as usize];
+
+        ProgramCounterAction::Advance
     }
 
-    fn op_8xy3(&mut self, x: u8, y: u8) {
+    fn op_8xy3(&mut self, x: u8, y: u8) -> ProgramCounterAction {
         self.v[x as usize] = self.v[x as usize] ^ self.v[y as usize];
+
+        ProgramCounterAction::Advance
     }
 
-    fn op_8xy4(&mut self, x: u8, y: u8) {
+    fn op_8xy4(&mut self, x: u8, y: u8) -> ProgramCounterAction {
         let vx = self.v[x as usize] as u16;
         let vy = self.v[y as usize] as u16;
 
@@ -226,34 +262,41 @@ impl Processor {
         if set_carry {
             self.v[0x0F] = 1;
         }
+
+        ProgramCounterAction::Advance
     }
 
-    fn op_8xy5(&mut self, x: u8, y: u8) {
+    fn op_8xy5(&mut self, x: u8, y: u8) -> ProgramCounterAction {
         let vx = self.v[x as usize];
         let vy = self.v[y as usize];
 
         self.v[x as usize] = vx.wrapping_sub(vy);
 
         self.v[0x0F] = if vx > vy { 1 } else { 0 };
+
+        ProgramCounterAction::Advance
     }
 
-    fn op_8xy6(&mut self, x: u8) {
+    fn op_8xy6(&mut self, x: u8) -> ProgramCounterAction {
         self.v[0x0F] = self.v[x as usize] % 2;
 
         self.v[x as usize] >>= 1;
+
+        ProgramCounterAction::Advance
     }
 
-    // TODO Check this one
-    fn op_8xy7(&mut self, x: u8, y: u8) {
+    fn op_8xy7(&mut self, x: u8, y: u8) -> ProgramCounterAction {
         let vx = self.v[x as usize];
         let vy = self.v[y as usize];
 
-        self.v[0x0F] = if vy > vx { 0 } else { 1 };
+        self.v[0x0F] = if vy > vx { 1 } else { 0 };
 
         self.v[x as usize] = vy.wrapping_sub(vx);
+
+        ProgramCounterAction::Advance
     }
 
-    fn op_8xyE(&mut self, x: u8) {
+    fn op_8xyE(&mut self, x: u8) -> ProgramCounterAction {
         self.v[0x0F] = if self.v[x as usize] & 0b1000_0000 != 0 {
             1
         } else {
@@ -261,29 +304,33 @@ impl Processor {
         };
 
         self.v[x as usize] <<= 2;
+
+        ProgramCounterAction::Advance
     }
 
-    fn op_9xy0(&mut self, x: u8, y: u8) {
-        if self.v[x as usize] != self.v[y as usize] {
-            self.pc += 2;
-        }
+    fn op_9xy0(&mut self, x: u8, y: u8) -> ProgramCounterAction {
+        ProgramCounterAction::skip_if(self.v[x as usize] != self.v[y as usize])
     }
 
-    fn op_Annn(&mut self, nnn: u16) {
+    fn op_Annn(&mut self, nnn: u16) -> ProgramCounterAction {
         self.i = nnn as usize;
+
+        ProgramCounterAction::Advance
     }
 
-    fn op_Bnnn(&mut self, nnn: u16) {
-        self.pc = (self.v[0] as u16 + nnn) as usize;
+    fn op_Bnnn(&mut self, nnn: u16) -> ProgramCounterAction {
+        ProgramCounterAction::Jump((self.v[0] as u16 + nnn) as usize)
     }
 
-    fn op_Cxkk(&mut self, x: u8, kk: u8) {
+    fn op_Cxkk(&mut self, x: u8, kk: u8) -> ProgramCounterAction {
         let rand_byte = rand::random::<u8>();
 
         self.v[x as usize] = rand_byte & kk;
+
+        ProgramCounterAction::Advance
     }
 
-    fn op_Dxyn(&mut self, x: u8, y: u8, n: u8) {
+    fn op_Dxyn(&mut self, x: u8, y: u8, n: u8) -> ProgramCounterAction {
         self.redraw = true;
         self.v[0x0F] = 0; // initially assume we don't flip any display bits
 
@@ -296,6 +343,8 @@ impl Processor {
             // wrap line here, wrap column in draw_line
             self.draw_line(x, (y + i) % 32, data);
         }
+
+        ProgramCounterAction::Advance
     }
 
     fn draw_line(&mut self, x: usize, y: usize, data: u8) {
@@ -310,98 +359,135 @@ impl Processor {
         }
     }
 
-    fn op_Ex9E(&mut self, x: u8) {
-        if self.pressed_keys[self.v[x as usize] as usize] {
-            self.pc += 2;
-        }
+    fn op_Ex9E(&mut self, x: u8) -> ProgramCounterAction {
+        ProgramCounterAction::skip_if(self.pressed_keys[self.v[x as usize] as usize])
     }
 
-    fn op_ExA1(&mut self, x: u8) {
-        if !self.pressed_keys[self.v[x as usize] as usize] {
-            self.pc += 2;
-        }
+    fn op_ExA1(&mut self, x: u8) -> ProgramCounterAction {
+        ProgramCounterAction::skip_if(!self.pressed_keys[self.v[x as usize] as usize])
     }
 
-    fn op_Fx07(&mut self, x: u8) {
+    fn op_Fx07(&mut self, x: u8) -> ProgramCounterAction {
         self.v[x as usize] = self.delay_timer;
+
+        ProgramCounterAction::Advance
     }
 
-    fn op_Fx0A(&mut self, x: u8) {
-        let initial_wait_for_key = self.wait_for_key;
-
-        self.wait_for_key = true;
+    fn op_Fx0A(&mut self, x: u8) -> ProgramCounterAction {
+        let mut user_pressed_key = false;
 
         for (idx, key_pressed) in self.pressed_keys.iter().enumerate() {
             if *key_pressed {
-                self.wait_for_key = false;
+                user_pressed_key = true;
                 self.v[x as usize] = idx as u8;
                 break;
             }
         }
 
-        if self.wait_for_key && !initial_wait_for_key && ENABLE_LOGS {
-            println!("Waiting for user input...");
-        }
+        ProgramCounterAction::action_if(
+            user_pressed_key,
+            ProgramCounterAction::Advance,
+            ProgramCounterAction::WaitForKey,
+        )
     }
 
-    fn op_Fx15(&mut self, x: u8) {
+    fn op_Fx15(&mut self, x: u8) -> ProgramCounterAction {
         self.delay_timer = self.v[x as usize];
+
+        ProgramCounterAction::Advance
     }
 
-    fn op_Fx18(&mut self, x: u8) {
+    fn op_Fx18(&mut self, x: u8) -> ProgramCounterAction {
         self.sound_timer = self.v[x as usize];
+
+        ProgramCounterAction::Advance
     }
 
-    fn op_Fx1E(&mut self, x: u8) {
+    fn op_Fx1E(&mut self, x: u8) -> ProgramCounterAction {
         self.i += self.v[x as usize] as usize;
+
+        ProgramCounterAction::Advance
     }
 
-    fn op_Fx29(&mut self, x: u8) {
+    fn op_Fx29(&mut self, x: u8) -> ProgramCounterAction {
         self.i = self.v[x as usize] as usize * 5;
+
+        ProgramCounterAction::Advance
     }
 
-    fn op_Fx33(&mut self, x: u8) {
+    fn op_Fx33(&mut self, x: u8) -> ProgramCounterAction {
         let vx = self.v[x as usize];
 
         self.mem[self.i] = vx / 100 % 10;
         self.mem[self.i + 1] = vx / 10 % 10;
         self.mem[self.i + 2] = vx % 10;
+
+        ProgramCounterAction::Advance
     }
 
-    fn op_Fx55(&mut self, x: u8) {
+    fn op_Fx55(&mut self, x: u8) -> ProgramCounterAction {
         for idx in 0..=x {
             self.mem[self.i + idx as usize] = self.v[idx as usize];
         }
+
+        ProgramCounterAction::Advance
     }
 
-    fn op_Fx65(&mut self, x: u8) {
+    fn op_Fx65(&mut self, x: u8) -> ProgramCounterAction {
         for idx in 0..=x {
             self.v[idx as usize] = self.mem[self.i + idx as usize];
         }
+
+        ProgramCounterAction::Advance
+    }
+}
+
+#[cfg(test)]
+mod pc_tests {
+    use super::*;
+
+    #[test]
+    fn test_pc_advance() {
+        let mut cpu = Processor::new();
+
+        cpu.mem[cpu.pc] = 0x00;
+        cpu.mem[cpu.pc + 1] = 0xE0;
+
+        cpu.run_cycle([false; 16]);
+
+        assert_eq!(
+            0x202, cpu.pc,
+            "PC should be incremented by 2 after a normal instruction"
+        );
     }
 
-    // Debug functions below
-    fn debug(&self) {
-        println!("\n\nPrinting current state:\n");
+    #[test]
+    fn test_pc_skip() {
+        let mut cpu = Processor::new();
 
-        println!("Vx: {:?}", self.v);
-        println!("I: {:?}", self.i);
-        println!("Stack (and pointer): {:?} -> {}", self.stack, self.sp);
-        println!("PC: {}", self.pc);
-        println!("Delay timer: {}", self.delay_timer);
-        println!("Sound timer: {}", self.sound_timer);
-        println!("Pressed keys: {:?}", self.pressed_keys);
-        println!("Wait for user input? {}", self.wait_for_key);
+        cpu.mem[cpu.pc] = 0x30;
+        cpu.mem[cpu.pc + 1] = 0x00;
 
-        print!("\n\n");
+        cpu.run_cycle([false; 16]);
+
+        assert_eq!(
+            0x204, cpu.pc,
+            "PC should be incremented by 4 after a skip instruction"
+        );
     }
 
-    fn debug_and_panic(&self, instruction: u16) {
-        self.debug();
+    #[test]
+    fn test_pc_jump() {
+        let mut cpu = Processor::new();
 
-        panic!(
-            "Ran into an error with instruction (might be unknown): {:#4x}",
-            instruction
+        cpu.mem[cpu.pc] = 0x1A;
+        cpu.mem[cpu.pc + 1] = 0xBC;
+
+        cpu.run_cycle([false; 16]);
+
+        assert_eq!(
+            0xABC, cpu.pc,
+            "PC should be set to address value after a jump instruction"
         );
     }
 }
