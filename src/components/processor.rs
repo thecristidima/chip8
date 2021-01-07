@@ -4,6 +4,17 @@ use std::fs;
 
 use rand;
 
+const ENABLE_LOGS: bool = false;
+
+const FONT_SET: [u8; 80] = [
+    // 16 sprites, each is 5 bytes long
+    0xF0, 0x90, 0x90, 0x90, 0xF0, 0x20, 0x60, 0x20, 0x20, 0x70, 0xF0, 0x10, 0xF0, 0x80, 0xF0, 0xF0,
+    0x10, 0xF0, 0x10, 0xF0, 0x90, 0x90, 0xF0, 0x10, 0x10, 0xF0, 0x80, 0xF0, 0x10, 0xF0, 0xF0, 0x80,
+    0xF0, 0x90, 0xF0, 0xF0, 0x10, 0x20, 0x40, 0x40, 0xF0, 0x90, 0xF0, 0x90, 0xF0, 0xF0, 0x90, 0xF0,
+    0x10, 0xF0, 0xF0, 0x90, 0xF0, 0x90, 0x90, 0xE0, 0x90, 0xE0, 0x90, 0xE0, 0xF0, 0x80, 0x80, 0x80,
+    0xF0, 0xE0, 0x90, 0x90, 0x90, 0xE0, 0xF0, 0x80, 0xF0, 0x80, 0xF0, 0xF0, 0x80, 0xF0, 0x80, 0x80,
+];
+
 pub struct Processor {
     mem: [u8; 4096],          // 4k memory
     v: [u8; 16],              // 16 8-bit general purpose registers
@@ -16,14 +27,17 @@ pub struct Processor {
     vram: [[u8; 64]; 32],     // display is 64 wide x 32 tall
     pressed_keys: [bool; 16], // array of pressed keys
     wait_for_key: bool,       // halt execution until user presses key
-
-    enable_logs: bool, // debug purposes
+    redraw: bool,             // helper flag set whenever DRAW is called
 }
 
 impl Processor {
-    pub fn new(enable_logs: bool) -> Processor {
+    pub fn new() -> Processor {
+        let mut mem = [0; 4096];
+
+        mem[0..80].copy_from_slice(&FONT_SET);
+
         Processor {
-            mem: [0; 4096],
+            mem,
             v: [0; 16],
             i: 0,
             stack: [0; 16],
@@ -37,8 +51,12 @@ impl Processor {
 
             pressed_keys: [false; 16],
             wait_for_key: false,
-            enable_logs,
+            redraw: false
         }
+    }
+
+    pub fn get_vram_ref(&self) -> &[[u8; 64]; 32] {
+        &self.vram
     }
 
     pub fn load_rom(&mut self, path: &str) {
@@ -46,24 +64,30 @@ impl Processor {
 
         self.mem[512..512 + rom.len()].copy_from_slice(&rom);
 
-        if self.enable_logs {
+        if ENABLE_LOGS {
             println!("Loaded ROM, total bytes: {}\n", rom.len());
         }
     }
 
-    pub fn run_cycle(&mut self) {
+    pub fn run_cycle(&mut self, pressed_keys: [bool; 16]) -> (bool, bool) {
+        self.redraw = false;
+        self.pressed_keys = pressed_keys;
+
         let instruction = (self.mem[self.pc] as u16) << 8 | self.mem[self.pc + 1] as u16;
 
-        if self.enable_logs {
-            println!(
-                "Reading instruction - high byte {:#2x}, low byte {:#2x} - {:#4x}",
-                self.mem[self.pc],
-                self.mem[self.pc + 1],
-                instruction
-            );
+        self.run_instruction(instruction);
+
+        if self.delay_timer > 0 {
+            self.delay_timer -= 1;
         }
 
-        self.run_instruction(instruction);
+        if self.sound_timer > 0 {
+            self.sound_timer -= 1;
+        }
+
+        let beep = if self.sound_timer > 0 { true } else { false };
+
+        (self.redraw, beep)
     }
 
     fn run_instruction(&mut self, instr: u16) {
@@ -115,13 +139,11 @@ impl Processor {
             (0x0F, _, 0x03, 0x03) => self.op_Fx33(x),
             (0x0F, _, 0x05, 0x05) => self.op_Fx55(x),
             (0x0F, _, 0x06, 0x05) => self.op_Fx65(x),
-            _ => self.debug_and_panic(instr),
+            _ => {},
         }
 
         if !self.wait_for_key {
-            println!("Before change: {}", self.pc);
             self.pc += 2; // advance PC to next instruction
-            println!("After change: {}", self.pc);
         }
     }
 
@@ -173,8 +195,9 @@ impl Processor {
 
     // TODO check for overflow?
     // documentation doesn't mention it, probably not an issue
+    // edit: this fails TEST_2, so leaving the wrapping bit on, but won't set VF
     fn op_7xkk(&mut self, x: u8, kk: u8) {
-        self.v[x as usize] += kk;
+        self.v[x as usize] = self.v[x as usize].wrapping_add(kk);
     }
 
     fn op_8xy0(&mut self, x: u8, y: u8) {
@@ -215,16 +238,17 @@ impl Processor {
     }
 
     fn op_8xy6(&mut self, x: u8) {
-        self.v[0x0F] = if self.v[x as usize] % 2 == 1 { 1 } else { 0 };
+        self.v[0x0F] = self.v[x as usize] % 2;
 
         self.v[x as usize] >>= 1;
     }
 
+    // TODO Check this one
     fn op_8xy7(&mut self, x: u8, y: u8) {
         let vx = self.v[x as usize];
         let vy = self.v[y as usize];
 
-        self.v[0x0F] = if vy > vx { 1 } else { 0 };
+        self.v[0x0F] = if vy > vx { 0 } else { 1 };
 
         self.v[x as usize] = vy.wrapping_sub(vx);
     }
@@ -260,13 +284,17 @@ impl Processor {
     }
 
     fn op_Dxyn(&mut self, x: u8, y: u8, n: u8) {
+        self.redraw = true;
         self.v[0x0F] = 0; // initially assume we don't flip any display bits
 
-        for i in 0..n {
-            let data = self.mem[self.i + i as usize];
+        let x = self.v[x as usize] as usize;
+        let y = self.v[y as usize] as usize;
+
+        for i in 0..n as usize {
+            let data = self.mem[self.i + i];
 
             // wrap line here, wrap column in draw_line
-            self.draw_line(x as usize, ((y + i) % 32) as usize, data);
+            self.draw_line(x, (y + i) % 32, data);
         }
     }
 
@@ -274,8 +302,6 @@ impl Processor {
         for bit_pos in 0..8 {
             let bit = data & (0x80 >> bit_pos);
 
-            // TODO I only considered a bit erased if we _flip_ it to 0
-            // In case you run out of ideas while debugging, play around with this
             if self.vram[y][(x + bit_pos) % 64] == 1 && bit == 1 {
                 self.v[0x0F] = 1;
             }
@@ -313,7 +339,7 @@ impl Processor {
             }
         }
 
-        if self.wait_for_key && !initial_wait_for_key && self.enable_logs {
+        if self.wait_for_key && !initial_wait_for_key && ENABLE_LOGS {
             println!("Waiting for user input...");
         }
     }

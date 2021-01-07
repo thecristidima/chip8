@@ -1,4 +1,7 @@
 // TODO Find out where this should be used
+// Later comment: I think this should be loaded at mem[0..]
+// Instruction Fx29 will set Vx to some place in memory where the font is stored
+// so we should have the sprites put there
 pub const FONT_SET: [u8; 80] = [
     // 16 sprites, each is 5 bytes long
     0xF0, 0x90, 0x90, 0x90, 0xF0, 0x20, 0x60, 0x20, 0x20, 0x70, 0xF0, 0x10, 0xF0, 0x80, 0xF0, 0xF0,
